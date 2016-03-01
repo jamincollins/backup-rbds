@@ -233,7 +233,7 @@ while getopts ":hm:l:d:n:" opt; do
 done
 shift $((OPTIND-1))
 
-NICE="nice -n ${NICELEVEL}"
+NICE="nice -n ${NICE_LEVEL}"
 DOMAINS="${*}"
 
 START=$(date +%s)

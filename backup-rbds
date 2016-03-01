@@ -35,7 +35,9 @@ log() {
     timestamp=$(date +%Y%m%d_%H%M%S)
     case ${level} in
         "info")
-            output "${timestamp} I: ${MSG}"
+            if ! ${QUIET}; then
+                output "${timestamp} I: ${MSG}"
+            fi
             ;;
         "warn")
             output "${timestamp} W: ${MSG}"
@@ -138,11 +140,16 @@ backup_domain_volumes() {
             prune_backups "${BACKUP_LOCATION}/${VOLUME}@*.img.gz"
         else
             SNAPSHOT_SIZE=$(get_snapshot_size ${SNAPSHOT})
+            if ${QUIET}; then
+                PV='cat'
+            else
+                PV="pv --eta --progress --rate --bytes --size ${SNAPSHOT_SIZE}"
+            fi
             if [ "$(parseSize ${SNAPSHOT_SIZE})" -lt ${BACKUP_LIMIT} ]; then
                 log "info" "Backing up ${VOLUME} ..."
                 # export the snapshot
                 ${NICE} rbd export --no-progress ${SNAPSHOT} - | \
-                    ${PV} --size ${SNAPSHOT_SIZE} | \
+                    ${PV} | \
                     ${NICE} pigz --rsyncable --fast --blocksize 4096 > ${DST}
                 touch ${DST}.done
                 prune_backups "${BACKUP_LOCATION}/${VOLUME}@*.img.gz"
@@ -200,16 +207,16 @@ usage(){
 # CONSTANTS
 MARKER=$(date +%Y%m%d)
 VIRSH='virsh'
-PV='pv --eta --progress --rate --bytes'
 
 # DEFAULTS
 MAX_BACKUPS=2
 BACKUP_LIMIT=$(parseSize 1T)
 BACKUP_LOCATION="/opt/backups"
 NICE_LEVEL=10
+QUIET=false
 
 
-while getopts ":hm:l:d:n:" opt; do
+while getopts ":hm:l:d:n:q" opt; do
     case "${opt}" in
         h)
             usage
@@ -225,6 +232,9 @@ while getopts ":hm:l:d:n:" opt; do
             ;;
         n)
             NICE_LEVEL=${OPTARG}
+            ;;
+        q)
+            QUIET=true
             ;;
         *)
             abort "Unsupported option {${opt}}"

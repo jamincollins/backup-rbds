@@ -134,7 +134,8 @@ prune_backups() {
 backup_domain_volumes() {
     for VOLUME in ${VOLUMES}; do
         SNAPSHOT=${VOLUME}@${MARKER}
-        DST="${BACKUP_LOCATION}/${SNAPSHOT}.img.gz"
+        EXT="img.lz4"
+        DST="${BACKUP_LOCATION}/${SNAPSHOT}.${EXT}"
         if [ -f ${DST}.done ] && [ -f ${DST} ]; then
             log "info" "Existing backup for ${VOLUME} found."
         else
@@ -149,13 +150,13 @@ backup_domain_volumes() {
                 # export the snapshot
                 ${NICE} rbd export --no-progress ${SNAPSHOT} - | \
                     ${PV} | \
-                    ${NICE} pigz --rsyncable --fast --blocksize 4096 > ${DST}
+                    ${NICE} lz4 > ${DST}
                 touch ${DST}.done
             else
                 log "info" "Skipping ${VOLUME}, it exceeds the backup limit."
             fi
         fi
-        prune_backups "${BACKUP_LOCATION}/${VOLUME}@*.img.gz"
+        prune_backups "${BACKUP_LOCATION}/${VOLUME}@*.${EXT}"
 
         # flatten the volume? -- rbd snap rm
         # {pool-name}/{image-name}@{snap-name}

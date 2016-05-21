@@ -131,37 +131,70 @@ prune_backups() {
     done
 }
 
-backup_domain_volumes() {
+backup_domain() {
+    DOMAIN=${1}
+
+    NEEDED=false
+
+    EXT="img.lz4"
+    VOLUMES=$(get_domain_volumes ${DOMAIN})
+    log "info" "Found volumes: ${VOLUMES}"
     for VOLUME in ${VOLUMES}; do
         SNAPSHOT=${VOLUME}@${MARKER}
-        EXT="img.lz4"
         DST="${BACKUP_LOCATION}/${SNAPSHOT}.${EXT}"
         if [ -f ${DST}.done ] && [ -f ${DST} ]; then
             log "info" "Existing backup for ${VOLUME} found."
         else
+            NEEDED=true
+        fi
+    done
+
+    if ${NEEDED}; then
+        suspend_domain ${DOMAIN}
+        snapshot_domain_volumes ${VOLUMES}
+        resume_domain ${DOMAIN}
+        for VOLUME in ${VOLUMES}; do
+            SNAPSHOT=${VOLUME}@${MARKER}
             SNAPSHOT_SIZE=$(get_snapshot_size ${SNAPSHOT})
+            DST="${BACKUP_LOCATION}/${SNAPSHOT}.${EXT}"
             if ${QUIET}; then
                 PV='cat'
             else
                 PV="pv --eta --progress --rate --bytes --size ${SNAPSHOT_SIZE}"
             fi
             if [ "$(parseSize ${SNAPSHOT_SIZE})" -lt ${BACKUP_LIMIT} ]; then
+                NEEDED=true
                 log "info" "Backing up ${VOLUME} ..."
+                # map the snapshot
+    #                 MAPPED_DEV=$(rbd map ${SNAPSHOT})
+    #                 ddrescue --sparse ${MAPPED_DEV} ${DST}
+    #                 rbd unmap ${MAPPED_DEV}
+
                 # export the snapshot
-                ${NICE} rbd export --no-progress ${SNAPSHOT} - | \
+                rbd export --no-progress ${SNAPSHOT} - | \
                     ${PV} | \
-                    ${NICE} lz4 > ${DST}
-                touch ${DST}.done
+                    lz4 > ${DST}
             else
                 log "info" "Skipping ${VOLUME}, it exceeds the backup limit."
             fi
-        fi
-        prune_backups "${BACKUP_LOCATION}/${VOLUME}@*.${EXT}"
+            touch ${DST}.done
+            prune_backups "${BACKUP_LOCATION}/${VOLUME}@*.${EXT}"
 
-        # flatten the volume? -- rbd snap rm
-        # {pool-name}/{image-name}@{snap-name}
-        log "info" "Removing snapshot ${SNAPSHOT} ..."
-        rbd snap rm ${VOLUME}@${MARKER}
+            # flatten the volume? -- rbd snap rm
+            # {pool-name}/{image-name}@{snap-name}
+            log "info" "Removing snapshot ${SNAPSHOT} ..."
+            rbd snap rm ${VOLUME}@${MARKER}
+        done
+        backup_domain_config ${DOMAIN}
+    fi
+}
+
+backup_domains() {
+    DOMAINS="${*}"
+
+    for DOMAIN in ${DOMAINS}; do
+        log "info" "Working with ${DOMAIN} ..."
+        backup_domain ${DOMAIN}
     done
 }
 
@@ -242,19 +275,9 @@ while getopts ":hm:l:d:n:q" opt; do
 done
 shift $((OPTIND-1))
 
-DOMAINS="${*}"
 
 START=$(date +%s)
-for DOMAIN in ${DOMAINS}; do
-    log "info" "Working with ${DOMAIN} ..."
-    VOLUMES=$(get_domain_volumes ${DOMAIN})
-    log "info" "Found volumes: ${VOLUMES}"
-    suspend_domain ${DOMAIN}
-    snapshot_domain_volumes ${VOLUMES}
-    resume_domain ${DOMAIN}
-    backup_domain_volumes ${VOLUMES}
-    backup_domain_config ${DOMAIN}
-done
+backup_domains "${*}"
 END=$(date +%s)
 
 DUR=$(get_duration ${START} ${END})
